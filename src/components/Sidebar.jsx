@@ -229,10 +229,12 @@ const Sidebar = () => {
 
   const adminLinks = [
     { path: '/admin/dashboard', label: 'Dashboard', icon: '📊' },
+    { path: '/admin/collections', label: 'Collections', icon: '📦' },
   ];
 
   const userLinks = [
     { path: '/user/overview', label: 'Overview', icon: '👁️' },
+    { path: '/user/collections', label: 'Collections', icon: '📦' },
   ];
 
   const links = isAdmin() ? adminLinks : userLinks;

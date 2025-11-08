@@ -1,22 +1,27 @@
 import { useState, useEffect } from 'react';
-import { getAllUsers, getUserPages, updateUserPages } from '../../api/auth';
+import { getAllUsers, getUserPages, updateUserPages, getUserCollections, updateUserCollections } from '../../api/auth';
 import { getPages } from '../../api/pages';
+import { getCollections } from '../../api/collections';
 import { toast } from 'react-toastify';
 import Loader from '../../components/Loader';
 
 const UsersManager = () => {
   const [users, setUsers] = useState([]);
   const [pages, setPages] = useState([]);
+  const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [userPages, setUserPages] = useState([]);
+  const [userCollections, setUserCollections] = useState([]);
   const [loadingPermissions, setLoadingPermissions] = useState(false);
   const [savingPermissions, setSavingPermissions] = useState(false);
+  const [activeTab, setActiveTab] = useState('pages'); // 'pages' or 'collections'
 
   useEffect(() => {
     fetchUsers();
     fetchPages();
+    fetchCollections();
   }, []);
 
   const fetchUsers = async () => {
@@ -42,19 +47,73 @@ const UsersManager = () => {
     }
   };
 
+  const fetchCollections = async () => {
+    try {
+      const response = await getCollections();
+      setCollections(response.data || []);
+    } catch (error) {
+      console.error('Error fetching collections:', error);
+    }
+  };
+
   const handleOpenPermissionsModal = async (user) => {
     setSelectedUser(user);
     setShowPermissionsModal(true);
     setLoadingPermissions(true);
+    setActiveTab('pages'); // Reset to pages tab
     
     try {
-      const response = await getUserPages(user._id || user.id);
-      const allowedPageIds = response.data || response || [];
-      setUserPages(allowedPageIds);
+      // Fetch user pages
+      const pagesResponse = await getUserPages(user._id || user.id);
+      console.log('User pages response:', pagesResponse);
+      
+      let allowedPageIds = [];
+      if (pagesResponse?.data) {
+        allowedPageIds = Array.isArray(pagesResponse.data) ? pagesResponse.data : [];
+      } else if (Array.isArray(pagesResponse)) {
+        allowedPageIds = pagesResponse;
+      }
+      
+      // Convert all page IDs to strings for consistent comparison
+      const pageIdStrings = allowedPageIds.map((id) => {
+        if (typeof id === 'string') return id;
+        if (typeof id === 'object' && id._id) return id._id.toString();
+        if (typeof id === 'object' && id.id) return id.id.toString();
+        return id.toString();
+      });
+      
+      console.log('Allowed page IDs (converted to strings):', pageIdStrings);
+      setUserPages(pageIdStrings);
+
+      // Fetch user collections
+      try {
+        const collectionsResponse = await getUserCollections(user._id || user.id);
+        let allowedCollectionIds = [];
+        if (collectionsResponse?.data) {
+          allowedCollectionIds = Array.isArray(collectionsResponse.data) ? collectionsResponse.data : [];
+        } else if (Array.isArray(collectionsResponse)) {
+          allowedCollectionIds = collectionsResponse;
+        }
+        
+        // Convert all collection IDs to strings
+        const collectionIdStrings = allowedCollectionIds.map((id) => {
+          if (typeof id === 'string') return id;
+          if (typeof id === 'object' && id._id) return id._id.toString();
+          if (typeof id === 'object' && id.id) return id.id.toString();
+          return id.toString();
+        });
+        
+        setUserCollections(collectionIdStrings);
+      } catch (error) {
+        console.error('Error fetching user collections:', error);
+        // If endpoint doesn't exist yet, set empty array
+        setUserCollections([]);
+      }
     } catch (error) {
-      console.error('Error fetching user pages:', error);
+      console.error('Error fetching user permissions:', error);
       toast.error('Failed to load user permissions');
       setUserPages([]);
+      setUserCollections([]);
     } finally {
       setLoadingPermissions(false);
     }
@@ -64,6 +123,8 @@ const UsersManager = () => {
     setShowPermissionsModal(false);
     setSelectedUser(null);
     setUserPages([]);
+    setUserCollections([]);
+    setActiveTab('pages');
   };
 
   const handleTogglePage = (pageId) => {
@@ -75,12 +136,35 @@ const UsersManager = () => {
     }
   };
 
+  const handleToggleCollection = (collectionId) => {
+    const collectionIdStr = collectionId.toString();
+    if (userCollections.includes(collectionIdStr)) {
+      setUserCollections(userCollections.filter((id) => id !== collectionIdStr));
+    } else {
+      setUserCollections([...userCollections, collectionIdStr]);
+    }
+  };
+
   const handleSavePermissions = async () => {
     if (!selectedUser) return;
 
     try {
       setSavingPermissions(true);
+      
+      // Update pages permissions
       await updateUserPages(selectedUser._id || selectedUser.id, userPages);
+      
+      // Update collections permissions
+      try {
+        await updateUserCollections(selectedUser._id || selectedUser.id, userCollections);
+      } catch (error) {
+        console.error('Error updating user collections:', error);
+        // If endpoint doesn't exist yet, just log the error but don't fail
+        if (error.response?.status !== 404) {
+          throw error;
+        }
+      }
+      
       toast.success('User permissions updated successfully');
       handleClosePermissionsModal();
     } catch (error) {
@@ -240,10 +324,10 @@ const UsersManager = () => {
       {/* Permissions Modal */}
       {showPermissionsModal && selectedUser && (
         <div className="fixed inset-0 bg-gray-600 dark:bg-gray-900 bg-opacity-50 dark:bg-opacity-75 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-3 border dark:border-gray-700 w-80 shadow-lg rounded-md bg-white dark:bg-gray-800 max-h-[80vh] overflow-y-auto">
+          <div className="relative top-20 mx-auto p-3 border dark:border-gray-700 w-96 shadow-lg rounded-md bg-white dark:bg-gray-800 max-h-[80vh] overflow-y-auto">
             <div className="mt-1">
-              <h3 className="text-sm font-medium text-gray-900 dark:text-gray-200 mb-2">
-                Manage Pages for: {selectedUser.username || selectedUser.name}
+              <h3 className="text-sm font-medium text-gray-900 dark:text-gray-200 mb-3">
+                Manage Permissions for: {selectedUser.username || selectedUser.name}
               </h3>
               
               {loadingPermissions ? (
@@ -252,39 +336,107 @@ const UsersManager = () => {
                 </div>
               ) : (
                 <>
-                  <div className="mb-2">
-                    <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
-                      Select pages that this user can access:
-                    </p>
-                    <div className="space-y-1 max-h-64 overflow-y-auto">
-                      {pages.length === 0 ? (
-                        <p className="text-gray-500 dark:text-gray-400 text-xs">No pages available</p>
-                      ) : (
-                        pages.map((page) => {
-                          const pageId = (page._id || page.id).toString();
-                          const isChecked = userPages.includes(pageId);
-                          return (
-                            <label
-                              key={pageId}
-                              className="flex items-center p-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => handleTogglePage(pageId)}
-                                className="h-3.5 w-3.5 text-[#4CAF50] dark:text-[#81C784] focus:ring-[#4CAF50] dark:focus:ring-[#81C784] border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
-                              />
-                              <span className="ml-1.5 text-xs text-gray-700 dark:text-gray-300">
-                                {page.name}
-                              </span>
-                            </label>
-                          );
-                        })
-                      )}
-                    </div>
+                  {/* Tabs */}
+                  <div className="flex border-b border-gray-200 dark:border-gray-700 mb-3">
+                    <button
+                      onClick={() => setActiveTab('pages')}
+                      className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                        activeTab === 'pages'
+                          ? 'text-[#4CAF50] dark:text-[#81C784] border-b-2 border-[#4CAF50] dark:border-[#81C784]'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      📄 Pages
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('collections')}
+                      className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                        activeTab === 'collections'
+                          ? 'text-[#4CAF50] dark:text-[#81C784] border-b-2 border-[#4CAF50] dark:border-[#81C784]'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      📦 Collections
+                    </button>
                   </div>
+
+                  {/* Pages Tab */}
+                  {activeTab === 'pages' && (
+                    <div className="mb-2">
+                      <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+                        Select pages that this user can access:
+                      </p>
+                      <div className="space-y-1 max-h-64 overflow-y-auto">
+                        {pages.length === 0 ? (
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">No pages available</p>
+                        ) : (
+                          pages.map((page) => {
+                            const pageId = (page._id || page.id).toString();
+                            // Ensure both are strings for comparison
+                            const isChecked = userPages.some((id) => id.toString() === pageId);
+                            
+                            return (
+                              <label
+                                key={pageId}
+                                className="flex items-center p-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleTogglePage(pageId)}
+                                  className="h-3.5 w-3.5 text-[#4CAF50] dark:text-[#81C784] focus:ring-[#4CAF50] dark:focus:ring-[#81C784] border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                                />
+                                <span className="ml-1.5 text-xs text-gray-700 dark:text-gray-300">
+                                  {page.name}
+                                  {isChecked && <span className="ml-1 text-[#4CAF50] dark:text-[#81C784]">✓</span>}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Collections Tab */}
+                  {activeTab === 'collections' && (
+                    <div className="mb-2">
+                      <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+                        Select collections that this user can access:
+                      </p>
+                      <div className="space-y-1 max-h-64 overflow-y-auto">
+                        {collections.length === 0 ? (
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">No collections available</p>
+                        ) : (
+                          collections.map((collection) => {
+                            const collectionId = (collection._id || collection.id).toString();
+                            // Ensure both are strings for comparison
+                            const isChecked = userCollections.some((id) => id.toString() === collectionId);
+                            
+                            return (
+                              <label
+                                key={collectionId}
+                                className="flex items-center p-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleToggleCollection(collectionId)}
+                                  className="h-3.5 w-3.5 text-[#4CAF50] dark:text-[#81C784] focus:ring-[#4CAF50] dark:focus:ring-[#81C784] border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                                />
+                                <span className="ml-1.5 text-xs text-gray-700 dark:text-gray-300">
+                                  {collection.name}
+                                  {isChecked && <span className="ml-1 text-[#4CAF50] dark:text-[#81C784]">✓</span>}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
                   
-                  <div className="flex justify-end space-x-2">
+                  <div className="flex justify-end space-x-2 mt-4">
                     <button
                       type="button"
                       onClick={handleClosePermissionsModal}

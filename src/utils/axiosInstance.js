@@ -26,6 +26,13 @@ axiosInstance.interceptors.request.use(
         method: config.method,
       });
     }
+    
+    // If uploading a file (FormData), remove Content-Type header to let axios set it automatically with boundary
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+      console.log('FormData detected, removing Content-Type header to let axios set boundary automatically');
+    }
+    
     return config;
   },
   (error) => {
