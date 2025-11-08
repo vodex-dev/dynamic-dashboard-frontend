@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { getPages, createPage, updatePage, deletePage } from '../api/pages';
 import { getUserPages } from '../api/auth';
 import { toast } from 'react-toastify';
 import Loader from './Loader';
 import { useAuth } from '../context/AuthContext';
 
-const PageList = ({ onPageSelect, selectedPageId }) => {
+const PageList = ({ onPageSelect, selectedPageId, userId }) => {
   const { isAdmin, user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [pages, setPages] = useState([]);
   const [allowedPageIds, setAllowedPageIds] = useState([]);
+  const [userPages, setUserPages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingUserPages, setLoadingUserPages] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingPage, setEditingPage] = useState(null);
   const [pageName, setPageName] = useState('');
@@ -23,6 +27,29 @@ const PageList = ({ onPageSelect, selectedPageId }) => {
       fetchUserPages();
     }
   }, [user, isAdmin]);
+
+  // Fetch pages for selected user (Admin only)
+  useEffect(() => {
+    if (isAdmin() && userId) {
+      fetchUserPagesForSelectedUser(userId);
+    } else {
+      setUserPages([]);
+    }
+  }, [userId, isAdmin]);
+
+  // Auto-select page from URL params
+  useEffect(() => {
+    const pageIdFromUrl = searchParams.get('page');
+    if (pageIdFromUrl && pages.length > 0) {
+      const page = pages.find((p) => {
+        const pId = (p._id || p.id).toString();
+        return pId === pageIdFromUrl;
+      });
+      if (page && (!selectedPageId || selectedPageId !== pageIdFromUrl)) {
+        onPageSelect(pageIdFromUrl, page.name);
+      }
+    }
+  }, [searchParams, pages, selectedPageId, onPageSelect]);
 
   const fetchPages = async () => {
     try {
@@ -101,8 +128,54 @@ const PageList = ({ onPageSelect, selectedPageId }) => {
     }
   };
 
+  const fetchUserPagesForSelectedUser = async (userId) => {
+    try {
+      setLoadingUserPages(true);
+      const userPagesResponse = await getUserPages(userId);
+      let pageIds = [];
+      if (userPagesResponse?.data) {
+        pageIds = Array.isArray(userPagesResponse.data) ? userPagesResponse.data : [];
+      } else if (Array.isArray(userPagesResponse)) {
+        pageIds = userPagesResponse;
+      }
+
+      // Convert to strings and handle both string and object IDs
+      const pageIdStrings = pageIds.map((id) => {
+        if (typeof id === 'string') return id;
+        if (typeof id === 'object' && id._id) return id._id.toString();
+        if (typeof id === 'object' && id.id) return id.id.toString();
+        return id.toString();
+      });
+
+      // Get full page objects from pages state or fetch if empty
+      let allPages = pages;
+      if (allPages.length === 0) {
+        const response = await getPages();
+        allPages = response.data || [];
+        setPages(allPages); // Update pages state
+      }
+
+      const userPages = allPages.filter((page) => {
+        const pageId = (page._id || page.id).toString();
+        return pageIdStrings.includes(pageId);
+      });
+
+      setUserPages(userPages);
+    } catch (error) {
+      console.error('Error fetching user pages:', error);
+      setUserPages([]);
+    } finally {
+      setLoadingUserPages(false);
+    }
+  };
+
   // Filter pages based on permissions
   const getFilteredPages = () => {
+    // If admin selected a user, show only that user's pages
+    if (isAdmin() && userId) {
+      return userPages; // Return user pages even if empty (will show "No pages available")
+    }
+    
     if (isAdmin()) {
       return pages; // Admin sees all pages
     }
@@ -200,7 +273,7 @@ const PageList = ({ onPageSelect, selectedPageId }) => {
     }
   };
 
-  if (loading) {
+  if (loading || (isAdmin() && userId && loadingUserPages)) {
     return <Loader />;
   }
 

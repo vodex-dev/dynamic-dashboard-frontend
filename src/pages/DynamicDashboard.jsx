@@ -1,13 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PageList from '../components/PageList';
 import SectionList from '../components/SectionList';
 import FieldList from '../components/FieldList';
 
 const DynamicDashboard = () => {
+  const [searchParams] = useSearchParams();
   const [selectedPageId, setSelectedPageId] = useState(null);
   const [selectedPageName, setSelectedPageName] = useState(null);
   const [selectedSectionId, setSelectedSectionId] = useState(null);
   const [selectedSectionName, setSelectedSectionName] = useState(null);
+
+  // Check URL params for page and user selection
+  useEffect(() => {
+    const pageIdFromUrl = searchParams.get('page');
+    if (pageIdFromUrl) {
+      // Page will be selected by PageList component when it loads
+      // We just need to set the ID here
+      setSelectedPageId(pageIdFromUrl);
+    } else {
+      // If no page in URL, clear selection
+      setSelectedPageId(null);
+      setSelectedPageName(null);
+      setSelectedSectionId(null);
+      setSelectedSectionName(null);
+    }
+  }, [searchParams]);
 
   const handlePageSelect = (pageId, pageName) => {
     setSelectedPageId(pageId);
@@ -28,6 +46,7 @@ const DynamicDashboard = () => {
         <PageList
           onPageSelect={handlePageSelect}
           selectedPageId={selectedPageId}
+          userId={searchParams.get('user')}
         />
       </div>
 
