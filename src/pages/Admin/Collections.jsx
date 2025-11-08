@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getCollections, createCollection, updateCollection, deleteCollection } from '../../api/collections';
 import { getFieldsBySectionId, createField, updateField, deleteField } from '../../api/fields';
 import { getUserCollections } from '../../api/auth';
@@ -11,8 +11,11 @@ import { useAuth } from '../../context/AuthContext';
 const Collections = () => {
   const { isAdmin, user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const selectedUserId = searchParams.get('user'); // Get userId from URL
   const [collections, setCollections] = useState([]);
   const [allowedCollectionIds, setAllowedCollectionIds] = useState([]);
+  const [userCollectionIds, setUserCollectionIds] = useState([]); // Collections for selected user
   const [loading, setLoading] = useState(true);
   const [showCollectionModal, setShowCollectionModal] = useState(false);
   const [editingCollection, setEditingCollection] = useState(null);
@@ -44,6 +47,15 @@ const Collections = () => {
       fetchUserCollections();
     }
   }, [user, isAdmin]);
+
+  // Fetch collections for selected user (Admin only)
+  useEffect(() => {
+    if (isAdmin() && selectedUserId) {
+      fetchUserCollectionsForSelectedUser(selectedUserId);
+    } else {
+      setUserCollectionIds([]);
+    }
+  }, [selectedUserId, isAdmin]);
 
   useEffect(() => {
     if (collections.length > 0) {
@@ -153,8 +165,40 @@ const Collections = () => {
     }
   };
 
+  const fetchUserCollectionsForSelectedUser = async (userId) => {
+    try {
+      const userCollectionsResponse = await getUserCollections(userId);
+      let collectionIds = [];
+      if (userCollectionsResponse?.data) {
+        collectionIds = Array.isArray(userCollectionsResponse.data) ? userCollectionsResponse.data : [];
+      } else if (Array.isArray(userCollectionsResponse)) {
+        collectionIds = userCollectionsResponse;
+      }
+
+      const collectionIdStrings = collectionIds.map((id) => {
+        if (typeof id === 'string') return id;
+        if (typeof id === 'object' && id._id) return id._id.toString();
+        if (typeof id === 'object' && id.id) return id.id.toString();
+        return id.toString();
+      });
+
+      setUserCollectionIds(collectionIdStrings);
+    } catch (error) {
+      console.error('Error fetching user collections:', error);
+      setUserCollectionIds([]);
+    }
+  };
+
   // Filter collections based on permissions
   const getFilteredCollections = () => {
+    // If admin selected a user, show only that user's collections
+    if (isAdmin() && selectedUserId && userCollectionIds.length > 0) {
+      return collections.filter((collection) => {
+        const collectionId = (collection._id || collection.id).toString();
+        return userCollectionIds.includes(collectionId);
+      });
+    }
+
     if (isAdmin()) {
       return collections; // Admin sees all collections
     }
@@ -439,13 +483,27 @@ const Collections = () => {
   return (
     <div className="p-3">
       <div className="flex justify-between items-center mb-3">
-        <h1 className="text-xl font-bold text-gray-800 dark:text-gray-200">Collections</h1>
-        <button
-          onClick={() => handleOpenCollectionModal()}
-          className="px-3 py-1.5 bg-[#4CAF50] text-white text-xs rounded-lg hover:bg-[#45a049] focus:outline-none focus:ring-2 focus:ring-[#4CAF50] transition-colors shadow-sm"
-        >
-          + Add Collection
-        </button>
+        <div>
+          <h1 className="text-xl font-bold text-gray-800 dark:text-gray-200">Collections</h1>
+          {isAdmin() && selectedUserId && (
+            <button
+              onClick={() => {
+                navigate(isAdmin() ? '/admin/collections' : '/user/collections');
+              }}
+              className="mt-1 px-2 py-1 bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs rounded hover:bg-gray-400 dark:hover:bg-gray-500 transition-colors"
+            >
+              ← Show All Collections
+            </button>
+          )}
+        </div>
+        {isAdmin() && !selectedUserId && (
+          <button
+            onClick={() => handleOpenCollectionModal()}
+            className="px-3 py-1.5 bg-[#4CAF50] text-white text-xs rounded-lg hover:bg-[#45a049] focus:outline-none focus:ring-2 focus:ring-[#4CAF50] transition-colors shadow-sm"
+          >
+            + Add Collection
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

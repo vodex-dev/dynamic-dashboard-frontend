@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getPages } from '../api/pages';
-import { getUserPages, getAllUsers } from '../api/auth';
+import { getCollections } from '../api/collections';
+import { getUserPages, getAllUsers, getUserCollections } from '../api/auth';
 
 const Sidebar = () => {
   const { isAdmin, user } = useAuth();
@@ -10,6 +11,7 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [isDynamicDropdownOpen, setIsDynamicDropdownOpen] = useState(false);
+  const [isCollectionsDropdownOpen, setIsCollectionsDropdownOpen] = useState(false);
   const [pages, setPages] = useState([]);
   const [allowedPageIds, setAllowedPageIds] = useState([]);
   const [loadingPages, setLoadingPages] = useState(false);
@@ -18,7 +20,12 @@ const Sidebar = () => {
   const [selectedUserPages, setSelectedUserPages] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadingUserPages, setLoadingUserPages] = useState(false);
+  const [collections, setCollections] = useState([]);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [collectionUsers, setCollectionUsers] = useState({}); // { collectionId: [users] }
+  const [loadingCollectionUsers, setLoadingCollectionUsers] = useState({});
   const dropdownRef = useRef(null);
+  const collectionsDropdownRef = useRef(null);
 
   const isActive = (path) => {
     return location.pathname === path;
@@ -26,6 +33,11 @@ const Sidebar = () => {
 
   const isDynamicDashboardActive = () => {
     return location.pathname === '/admin/dynamic' || location.pathname === '/user/dynamic';
+  };
+
+  const isCollectionsActive = () => {
+    return location.pathname === '/admin/collections' || location.pathname === '/user/collections' || 
+           location.pathname === '/admin/collection-items' || location.pathname === '/user/collection-items';
   };
 
   useEffect(() => {
@@ -43,6 +55,24 @@ const Sidebar = () => {
     }
   }, [isDynamicDashboardActive(), user, isAdmin, searchParams]);
 
+  useEffect(() => {
+    if (isCollectionsActive()) {
+      fetchCollections();
+    }
+  }, [isCollectionsActive()]);
+
+  useEffect(() => {
+    if (isCollectionsActive() && collections.length > 0 && isAdmin()) {
+      // Fetch users for each collection (only if not already fetched)
+      collections.forEach((collection) => {
+        const collectionId = (collection._id || collection.id).toString();
+        if (!collectionUsers[collectionId] && !loadingCollectionUsers[collectionId]) {
+          fetchUsersForCollection(collectionId);
+        }
+      });
+    }
+  }, [collections, isCollectionsActive(), isAdmin]);
+
   // Fetch user pages when a user is selected (Admin only)
   useEffect(() => {
     if (isAdmin() && selectedUserId) {
@@ -50,11 +80,14 @@ const Sidebar = () => {
     }
   }, [selectedUserId, isAdmin]);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsDynamicDropdownOpen(false);
+      }
+      if (collectionsDropdownRef.current && !collectionsDropdownRef.current.contains(event.target)) {
+        setIsCollectionsDropdownOpen(false);
       }
     };
 
@@ -227,14 +260,87 @@ const Sidebar = () => {
     setIsDynamicDropdownOpen(false);
   };
 
+  const fetchCollections = async () => {
+    try {
+      setLoadingCollections(true);
+      const response = await getCollections();
+      const allCollections = response.data || [];
+      setCollections(allCollections);
+    } catch (error) {
+      console.error('Error fetching collections:', error);
+      setCollections([]);
+    } finally {
+      setLoadingCollections(false);
+    }
+  };
+
+  const fetchUsersForCollection = async (collectionId) => {
+    try {
+      setLoadingCollectionUsers(prev => ({ ...prev, [collectionId]: true }));
+      
+      // Get all users
+      const response = await getAllUsers();
+      const allUsers = response.data || response || [];
+      const regularUsers = allUsers.filter((u) => u.role !== 'admin');
+      
+      // For each user, check if they have access to this collection
+      const usersWithAccess = [];
+      for (const userItem of regularUsers) {
+        const userId = userItem._id || userItem.id;
+        if (userId) {
+          try {
+            const userCollectionsResponse = await getUserCollections(userId);
+            let collectionIds = [];
+            if (userCollectionsResponse?.data) {
+              collectionIds = Array.isArray(userCollectionsResponse.data) ? userCollectionsResponse.data : [];
+            } else if (Array.isArray(userCollectionsResponse)) {
+              collectionIds = userCollectionsResponse;
+            }
+            
+            const collectionIdStrings = collectionIds.map((id) => {
+              if (typeof id === 'string') return id;
+              if (typeof id === 'object' && id._id) return id._id.toString();
+              if (typeof id === 'object' && id.id) return id.id.toString();
+              return id.toString();
+            });
+            
+            const collectionIdStr = collectionId.toString();
+            if (collectionIdStrings.includes(collectionIdStr)) {
+              usersWithAccess.push(userItem);
+            }
+          } catch (error) {
+            // If error, skip this user
+            console.log(`Skipping user ${userId} - error checking collections:`, error);
+          }
+        }
+      }
+      
+      setCollectionUsers(prev => ({ ...prev, [collectionId]: usersWithAccess }));
+    } catch (error) {
+      console.error('Error fetching users for collection:', error);
+      setCollectionUsers(prev => ({ ...prev, [collectionId]: [] }));
+    } finally {
+      setLoadingCollectionUsers(prev => ({ ...prev, [collectionId]: false }));
+    }
+  };
+
+  const handleCollectionSelect = (collectionId = null) => {
+    const basePath = isAdmin() ? '/admin/collections' : '/user/collections';
+    if (collectionId) {
+      navigate(basePath);
+      // You can add collectionId to URL if needed
+    } else {
+      navigate(basePath);
+    }
+    setIsCollectionsDropdownOpen(false);
+  };
+
   const adminLinks = [
     { path: '/admin/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/admin/collections', label: 'Collections', icon: '📦' },
   ];
 
   const userLinks = [
     { path: '/user/overview', label: 'Overview', icon: '👁️' },
-    { path: '/user/collections', label: 'Collections', icon: '📦' },
   ];
 
   const links = isAdmin() ? adminLinks : userLinks;
@@ -364,6 +470,139 @@ const Sidebar = () => {
 
                     {!loadingPages && getFilteredPages().length === 0 && (
                       <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">No pages available</div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Collections with Dropdown */}
+          <div className="relative" ref={collectionsDropdownRef}>
+            <button
+              onClick={() => setIsCollectionsDropdownOpen(!isCollectionsDropdownOpen)}
+              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg transition-colors text-sm ${
+                isCollectionsActive()
+                  ? 'bg-[#4CAF50] dark:bg-[#4CAF50] text-white shadow-md'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <span className="text-base">📦</span>
+                <span>Collections</span>
+              </div>
+              <span className={`text-xs transition-transform ${isCollectionsDropdownOpen ? 'rotate-180' : ''}`}>
+                ▼
+              </span>
+            </button>
+
+            {isCollectionsDropdownOpen && (
+              <div className="mt-1 ml-2 space-y-0.5 border-l-2 border-gray-300 dark:border-gray-600 pl-2">
+                {isAdmin() ? (
+                  <>
+                    {/* All Collections Option - Admin only */}
+                    <button
+                      onClick={() => {
+                        handleCollectionSelect(null);
+                      }}
+                      className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors text-xs ${
+                        isCollectionsActive() && !new URLSearchParams(location.search).get('collectionId')
+                          ? 'bg-[#007BFF] dark:bg-[#60A5FA] text-white'
+                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      📦 All Collections
+                    </button>
+
+                    {/* Collections List - Admin only */}
+                    {loadingCollections ? (
+                      <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">Loading collections...</div>
+                    ) : (
+                      collections.map((collection) => {
+                        const collectionId = (collection._id || collection.id).toString();
+                        const usersForCollection = collectionUsers[collectionId] || [];
+                        const isLoadingUsers = loadingCollectionUsers[collectionId] || false;
+
+                        // Only show users, not collection name
+                        if (isLoadingUsers) {
+                          return (
+                            <div key={collectionId} className="px-4 py-1 text-xs text-gray-500 dark:text-gray-400">
+                              Loading users...
+                            </div>
+                          );
+                        }
+
+                        if (usersForCollection.length > 0) {
+                          return usersForCollection.map((userItem) => {
+                            const userId = (userItem._id || userItem.id).toString();
+                            const isUserSelected = searchParams.get('user') === userId;
+                            return (
+                              <button
+                                key={`${collectionId}-${userId}`}
+                                onClick={() => {
+                                  const basePath = isAdmin() ? '/admin/collections' : '/user/collections';
+                                  navigate(`${basePath}?user=${userId}`);
+                                  setIsCollectionsDropdownOpen(false);
+                                }}
+                                className={`w-full text-left px-2 py-1 rounded-lg transition-colors text-xs ${
+                                  isUserSelected
+                                    ? 'bg-[#4CAF50] dark:bg-[#81C784] text-white'
+                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                }`}
+                              >
+                                👤 {userItem.username || userItem.name || userItem.email}
+                              </button>
+                            );
+                          });
+                        }
+
+                        return null; // Don't show "No users assigned" for empty collections
+                      })
+                    )}
+
+                    {!loadingCollections && collections.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">No collections available</div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Regular User View - Show Collections */}
+                    <button
+                      onClick={() => handleCollectionSelect(null)}
+                      className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors text-xs ${
+                        isCollectionsActive() && !new URLSearchParams(location.search).get('collectionId')
+                          ? 'bg-[#007BFF] dark:bg-[#60A5FA] text-white'
+                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      📦 All Collections
+                    </button>
+
+                    {/* Individual Collections */}
+                    {loadingCollections ? (
+                      <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">Loading...</div>
+                    ) : (
+                      collections.map((collection) => {
+                        const collectionId = (collection._id || collection.id).toString();
+                        const isSelected = new URLSearchParams(location.search).get('collectionId') === collectionId;
+                        return (
+                          <button
+                            key={collectionId}
+                            onClick={() => handleCollectionSelect(collectionId)}
+                            className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors text-xs ${
+                              isSelected
+                                ? 'bg-[#007BFF] dark:bg-[#60A5FA] text-white'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            📦 {collection.name}
+                          </button>
+                        );
+                      })
+                    )}
+
+                    {!loadingCollections && collections.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">No collections available</div>
                     )}
                   </>
                 )}
