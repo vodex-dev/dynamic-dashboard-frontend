@@ -16,6 +16,7 @@ import SectionsManager from './pages/Admin/SectionsManager';
 import UsersManager from './pages/Admin/UsersManager';
 import Collections from './pages/Admin/Collections';
 import CollectionItems from './pages/Admin/CollectionItems';
+import Forms from './pages/Admin/Forms';
 import Overview from './pages/User/Overview';
 
 const AdminLayout = () => {
@@ -67,6 +68,7 @@ function App() {
               <Route path="/admin/users" element={<UsersManager />} />
               <Route path="/admin/collections" element={<Collections />} />
               <Route path="/admin/collection-items" element={<CollectionItems />} />
+              <Route path="/admin/forms" element={<Forms />} />
             </Route>
           </Route>
 
@@ -77,6 +79,7 @@ function App() {
               <Route path="/user/dynamic" element={<DynamicDashboard />} />
               <Route path="/user/collections" element={<Collections />} />
               <Route path="/user/collection-items" element={<CollectionItems />} />
+              <Route path="/user/forms" element={<Forms />} />
             </Route>
           </Route>
 

@@ -476,6 +476,16 @@ const Collections = () => {
     }
   };
 
+  const copyApiUrl = async (url) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied ✅');
+    } catch (error) {
+      console.error('Failed to copy:', error);
+      toast.error('Failed to copy link');
+    }
+  };
+
   if (loading) {
     return <Loader />;
   }
@@ -541,6 +551,7 @@ const Collections = () => {
                   {getFilteredCollections().map((collection) => {
                     const collectionId = collection._id || collection.id;
                     const isSelected = selectedCollectionId === collectionId;
+                    const apiUrl = `https://dynamic-dashboard-backend.onrender.com/api/collection-items/${collectionId}`;
                     return (
                       <tr
                         key={collectionId}
@@ -559,6 +570,33 @@ const Collections = () => {
                           {collection.description && (
                             <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                               {collection.description}
+                            </div>
+                          )}
+                          {/* API Link */}
+                          {isAdmin() && (
+                            <div className="mt-1.5 pt-1.5 border-t border-gray-200 dark:border-gray-600">
+                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                API Link:
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={apiUrl}
+                                  readOnly
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-mono"
+                                />
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyApiUrl(apiUrl);
+                                  }}
+                                  className="px-2 py-1 bg-[#007BFF] text-white text-xs rounded-md hover:bg-[#0066cc] focus:outline-none focus:ring-2 focus:ring-[#007BFF] transition-colors whitespace-nowrap shadow-sm"
+                                  title="Copy API link"
+                                >
+                                  📋 Copy
+                                </button>
+                              </div>
                             </div>
                           )}
                         </td>

@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useAuth } from '../context/AuthContext';
 import { getPages } from '../api/pages';
 import { getCollections } from '../api/collections';
-import { getUserPages, getAllUsers, getUserCollections } from '../api/auth';
+import { getForms } from '../api/forms';
+import { getUserPages, getAllUsers, getUserCollections, getUserForms } from '../api/auth';
 
 const Sidebar = () => {
   const { isAdmin, user } = useAuth();
@@ -12,6 +13,7 @@ const Sidebar = () => {
   const [searchParams] = useSearchParams();
   const [isDynamicDropdownOpen, setIsDynamicDropdownOpen] = useState(false);
   const [isCollectionsDropdownOpen, setIsCollectionsDropdownOpen] = useState(false);
+  const [isFormsDropdownOpen, setIsFormsDropdownOpen] = useState(false);
   const [pages, setPages] = useState([]);
   const [allowedPageIds, setAllowedPageIds] = useState([]);
   const [loadingPages, setLoadingPages] = useState(false);
@@ -24,8 +26,13 @@ const Sidebar = () => {
   const [loadingCollections, setLoadingCollections] = useState(false);
   const [collectionUsers, setCollectionUsers] = useState({}); // { collectionId: [users] }
   const [loadingCollectionUsers, setLoadingCollectionUsers] = useState({});
+  const [forms, setForms] = useState([]);
+  const [loadingForms, setLoadingForms] = useState(false);
+  const [formUsers, setFormUsers] = useState({}); // { formId: [users] }
+  const [loadingFormUsers, setLoadingFormUsers] = useState({});
   const dropdownRef = useRef(null);
   const collectionsDropdownRef = useRef(null);
+  const formsDropdownRef = useRef(null);
 
   const isActive = (path) => {
     return location.pathname === path;
@@ -38,6 +45,10 @@ const Sidebar = () => {
   const isCollectionsActive = () => {
     return location.pathname === '/admin/collections' || location.pathname === '/user/collections' || 
            location.pathname === '/admin/collection-items' || location.pathname === '/user/collection-items';
+  };
+
+  const isFormsActive = () => {
+    return location.pathname === '/admin/forms' || location.pathname === '/user/forms';
   };
 
   useEffect(() => {
@@ -73,6 +84,24 @@ const Sidebar = () => {
     }
   }, [collections, isCollectionsActive(), isAdmin]);
 
+  useEffect(() => {
+    if (isFormsActive()) {
+      fetchForms();
+    }
+  }, [isFormsActive()]);
+
+  useEffect(() => {
+    if (isFormsActive() && forms.length > 0 && isAdmin()) {
+      // Fetch users for each form (only if not already fetched)
+      forms.forEach((form) => {
+        const formId = (form._id || form.id).toString();
+        if (!formUsers[formId] && !loadingFormUsers[formId]) {
+          fetchUsersForForm(formId);
+        }
+      });
+    }
+  }, [forms, isFormsActive(), isAdmin]);
+
   // Fetch user pages when a user is selected (Admin only)
   useEffect(() => {
     if (isAdmin() && selectedUserId) {
@@ -88,6 +117,9 @@ const Sidebar = () => {
       }
       if (collectionsDropdownRef.current && !collectionsDropdownRef.current.contains(event.target)) {
         setIsCollectionsDropdownOpen(false);
+      }
+      if (formsDropdownRef.current && !formsDropdownRef.current.contains(event.target)) {
+        setIsFormsDropdownOpen(false);
       }
     };
 
@@ -333,6 +365,80 @@ const Sidebar = () => {
       navigate(basePath);
     }
     setIsCollectionsDropdownOpen(false);
+  };
+
+  const fetchForms = async () => {
+    try {
+      setLoadingForms(true);
+      const response = await getForms();
+      const formsData = response.data || response || [];
+      setForms(formsData);
+    } catch (error) {
+      console.error('Error fetching forms:', error);
+      setForms([]);
+    } finally {
+      setLoadingForms(false);
+    }
+  };
+
+  const fetchUsersForForm = async (formId) => {
+    try {
+      setLoadingFormUsers(prev => ({ ...prev, [formId]: true }));
+      
+      // Get all users
+      const response = await getAllUsers();
+      const allUsers = response.data || response || [];
+      const regularUsers = allUsers.filter((u) => u.role !== 'admin');
+      
+      // For each user, check if they have access to this form
+      const usersWithAccess = [];
+      for (const userItem of regularUsers) {
+        const userId = userItem._id || userItem.id;
+        if (userId) {
+          try {
+            const userFormsResponse = await getUserForms(userId);
+            let formIds = [];
+            if (userFormsResponse?.data) {
+              formIds = Array.isArray(userFormsResponse.data) ? userFormsResponse.data : [];
+            } else if (Array.isArray(userFormsResponse)) {
+              formIds = userFormsResponse;
+            }
+            
+            const formIdStrings = formIds.map((id) => {
+              if (typeof id === 'string') return id;
+              if (typeof id === 'object' && id._id) return id._id.toString();
+              if (typeof id === 'object' && id.id) return id.id.toString();
+              return id.toString();
+            });
+            
+            const formIdStr = formId.toString();
+            if (formIdStrings.includes(formIdStr)) {
+              usersWithAccess.push(userItem);
+            }
+          } catch (error) {
+            // If error, skip this user
+            console.log(`Skipping user ${userId} - error checking forms:`, error);
+          }
+        }
+      }
+      
+      setFormUsers(prev => ({ ...prev, [formId]: usersWithAccess }));
+    } catch (error) {
+      console.error('Error fetching users for form:', error);
+      setFormUsers(prev => ({ ...prev, [formId]: [] }));
+    } finally {
+      setLoadingFormUsers(prev => ({ ...prev, [formId]: false }));
+    }
+  };
+
+  const handleFormSelect = (userId = null) => {
+    const basePath = isAdmin() ? '/admin/forms' : '/user/forms';
+    if (userId) {
+      navigate(`${basePath}?user=${userId}`); // Navigate to specific user's forms
+    } else {
+      navigate(basePath); // Navigate to all forms
+    }
+    setIsFormsDropdownOpen(false);
   };
 
   const adminLinks = [
@@ -603,6 +709,150 @@ const Sidebar = () => {
 
                     {!loadingCollections && collections.length === 0 && (
                       <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">No collections available</div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Forms with Dropdown */}
+          <div className="relative" ref={formsDropdownRef}>
+            <button
+              onClick={() => setIsFormsDropdownOpen(!isFormsDropdownOpen)}
+              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg transition-colors text-sm ${
+                isFormsActive()
+                  ? 'bg-[#4CAF50] dark:bg-[#4CAF50] text-white shadow-md'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <span className="text-base">📋</span>
+                <span>Forms</span>
+              </div>
+              <span className={`text-xs transition-transform ${isFormsDropdownOpen ? 'rotate-180' : ''}`}>
+                ▼
+              </span>
+            </button>
+
+            {isFormsDropdownOpen && (
+              <div className="mt-1 ml-2 space-y-0.5 border-l-2 border-gray-300 dark:border-gray-600 pl-2">
+                {isAdmin() ? (
+                  <>
+                    {/* All Forms Option - Admin only */}
+                    <button
+                      onClick={() => {
+                        handleFormSelect(null);
+                      }}
+                      className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors text-xs ${
+                        isFormsActive() && !new URLSearchParams(location.search).get('user')
+                          ? 'bg-[#007BFF] dark:bg-[#60A5FA] text-white'
+                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      📋 All Forms
+                    </button>
+
+                    {/* Forms List - Admin only */}
+                    {(() => {
+                      // Check if any form is still loading users
+                      const anyFormLoading = forms.some((form) => {
+                        const formId = (form._id || form.id).toString();
+                        return loadingFormUsers[formId] || false;
+                      });
+
+                      if (anyFormLoading) {
+                        return (
+                          <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">Loading users...</div>
+                        );
+                      }
+
+                      // Collect all unique users from all forms
+                      const uniqueUsersMap = new Map();
+                      forms.forEach((form) => {
+                        const formId = (form._id || form.id).toString();
+                        const usersForForm = formUsers[formId] || [];
+                        usersForForm.forEach((userItem) => {
+                          const userId = (userItem._id || userItem.id).toString();
+                          if (!uniqueUsersMap.has(userId)) {
+                            uniqueUsersMap.set(userId, userItem);
+                          }
+                        });
+                      });
+
+                      const uniqueUsers = Array.from(uniqueUsersMap.values());
+
+                      if (uniqueUsers.length === 0) {
+                        return (
+                          <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">No users assigned to forms</div>
+                        );
+                      }
+
+                      // Display unique users
+                      return uniqueUsers.map((userItem) => {
+                        const userId = (userItem._id || userItem.id).toString();
+                        const isUserSelected = searchParams.get('user') === userId;
+                        return (
+                          <button
+                            key={userId}
+                            onClick={() => {
+                              handleFormSelect(userId);
+                            }}
+                            className={`w-full text-left px-2 py-1 rounded-lg transition-colors text-xs ${
+                              isUserSelected
+                                ? 'bg-[#4CAF50] dark:bg-[#81C784] text-white'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            👤 {userItem.username || userItem.name || userItem.email}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </>
+                ) : (
+                  <>
+                    {/* Regular User View - Show Forms */}
+                    <button
+                      onClick={() => handleFormSelect(null)}
+                      className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors text-xs ${
+                        isFormsActive() && !new URLSearchParams(location.search).get('user')
+                          ? 'bg-[#007BFF] dark:bg-[#60A5FA] text-white'
+                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      📋 All Forms
+                    </button>
+
+                    {/* Individual Forms */}
+                    {loadingForms ? (
+                      <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">Loading...</div>
+                    ) : (
+                      forms.map((form) => {
+                        const formId = (form._id || form.id).toString();
+                        const isSelected = new URLSearchParams(location.search).get('formId') === formId;
+                        return (
+                          <button
+                            key={formId}
+                            onClick={() => {
+                              const basePath = isAdmin() ? '/admin/forms' : '/user/forms';
+                              navigate(`${basePath}?formId=${formId}`);
+                              setIsFormsDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors text-xs ${
+                              isSelected
+                                ? 'bg-[#007BFF] dark:bg-[#60A5FA] text-white'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            📋 {form.name}
+                          </button>
+                        );
+                      })
+                    )}
+
+                    {!loadingForms && forms.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">No forms available</div>
                     )}
                   </>
                 )}

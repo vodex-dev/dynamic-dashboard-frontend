@@ -96,3 +96,63 @@ export const updateUserCollections = async (userId, collectionIds) => {
   }
 };
 
+// جلب الفورمات المسموحة لمستخدم معين
+export const getUserForms = async (userId) => {
+  try {
+    console.log('Fetching user forms for userId:', userId);
+    const res = await axiosInstance.get(`/auth/users/${userId}/forms`);
+    console.log('User forms response:', res.data);
+    return res.data;
+  } catch (error) {
+    console.error('Error in getUserForms:', {
+      userId,
+      url: `/auth/users/${userId}/forms`,
+      status: error.response?.status,
+      message: error.message,
+      responseData: error.response?.data,
+    });
+    throw error;
+  }
+};
+
+// تحديث الفورمات المسموحة لمستخدم معين
+export const updateUserForms = async (userId, formIds) => {
+  try {
+    console.log('Updating user forms for userId:', userId);
+    console.log('FormIds to send:', formIds);
+    console.log('FormIds type:', typeof formIds);
+    console.log('FormIds is array:', Array.isArray(formIds));
+    
+    // Ensure formIds is an array
+    const formIdsArray = Array.isArray(formIds) ? formIds : [];
+    
+    // Prepare request data
+    const requestData = {
+      formIds: formIdsArray
+    };
+    
+    console.log('Request data:', requestData);
+    console.log('Request URL:', `/auth/users/${userId}/forms`);
+    
+    const res = await axiosInstance.put(`/auth/users/${userId}/forms`, requestData);
+    console.log('Update user forms response:', res.data);
+    console.log('Response status:', res.status);
+    return res.data;
+  } catch (error) {
+    console.error('Error in updateUserForms:', {
+      userId,
+      formIds,
+      formIdsType: typeof formIds,
+      formIdsIsArray: Array.isArray(formIds),
+      url: `/auth/users/${userId}/forms`,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      message: error.message,
+      responseData: error.response?.data,
+      requestData: error.config?.data,
+      requestHeaders: error.config?.headers,
+    });
+    throw error;
+  }
+};
+

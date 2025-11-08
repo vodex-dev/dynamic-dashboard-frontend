@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { getAllUsers, getUserPages, updateUserPages, getUserCollections, updateUserCollections } from '../../api/auth';
+import { getAllUsers, getUserPages, updateUserPages, getUserCollections, updateUserCollections, getUserForms, updateUserForms } from '../../api/auth';
 import { getPages } from '../../api/pages';
 import { getCollections } from '../../api/collections';
+import { getForms } from '../../api/forms';
 import { toast } from 'react-toastify';
 import Loader from '../../components/Loader';
 
@@ -9,19 +10,22 @@ const UsersManager = () => {
   const [users, setUsers] = useState([]);
   const [pages, setPages] = useState([]);
   const [collections, setCollections] = useState([]);
+  const [forms, setForms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [userPages, setUserPages] = useState([]);
   const [userCollections, setUserCollections] = useState([]);
+  const [userForms, setUserForms] = useState([]);
   const [loadingPermissions, setLoadingPermissions] = useState(false);
   const [savingPermissions, setSavingPermissions] = useState(false);
-  const [activeTab, setActiveTab] = useState('pages'); // 'pages' or 'collections'
+  const [activeTab, setActiveTab] = useState('pages'); // 'pages', 'collections', or 'forms'
 
   useEffect(() => {
     fetchUsers();
     fetchPages();
     fetchCollections();
+    fetchForms();
   }, []);
 
   const fetchUsers = async () => {
@@ -53,6 +57,15 @@ const UsersManager = () => {
       setCollections(response.data || []);
     } catch (error) {
       console.error('Error fetching collections:', error);
+    }
+  };
+
+  const fetchForms = async () => {
+    try {
+      const response = await getForms();
+      setForms(response.data || []);
+    } catch (error) {
+      console.error('Error fetching forms:', error);
     }
   };
 
@@ -109,11 +122,72 @@ const UsersManager = () => {
         // If endpoint doesn't exist yet, set empty array
         setUserCollections([]);
       }
+
+      // Fetch user forms
+      try {
+        const userId = user._id || user.id;
+        console.log('Fetching user forms for userId:', userId);
+        const formsResponse = await getUserForms(userId);
+        console.log('Raw forms response:', formsResponse);
+        console.log('Response type:', typeof formsResponse);
+        console.log('Response is array:', Array.isArray(formsResponse));
+        
+        let allowedFormIds = [];
+        if (formsResponse?.data) {
+          allowedFormIds = Array.isArray(formsResponse.data) ? formsResponse.data : [];
+        } else if (Array.isArray(formsResponse)) {
+          allowedFormIds = formsResponse;
+        } else if (formsResponse?.allowedForms) {
+          // If backend returns { allowedForms: [...] }
+          allowedFormIds = Array.isArray(formsResponse.allowedForms) ? formsResponse.allowedForms : [];
+        } else if (formsResponse && typeof formsResponse === 'object') {
+          // Try to extract IDs from response object
+          const keys = Object.keys(formsResponse);
+          console.log('Response keys:', keys);
+          if (keys.length > 0) {
+            // Try first key that might be an array
+            for (const key of keys) {
+              if (Array.isArray(formsResponse[key])) {
+                allowedFormIds = formsResponse[key];
+                break;
+              }
+            }
+          }
+        }
+        
+        console.log('Extracted allowedFormIds:', allowedFormIds);
+        
+        // Convert all form IDs to strings
+        const formIdStrings = allowedFormIds.map((id) => {
+          if (typeof id === 'string') return id;
+          if (typeof id === 'object' && id._id) return id._id.toString();
+          if (typeof id === 'object' && id.id) return id.id.toString();
+          return id.toString();
+        });
+        
+        console.log('User forms IDs (converted to strings):', formIdStrings);
+        setUserForms(formIdStrings);
+      } catch (error) {
+        console.error('Error fetching user forms:', error);
+        console.error('Error details:', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          message: error.message,
+          url: error.config?.url
+        });
+        // If endpoint doesn't exist yet (404), set empty array
+        if (error.response?.status === 404) {
+          console.log('Forms endpoint not found (404), user may not have any forms assigned');
+        }
+        setUserForms([]);
+      }
     } catch (error) {
       console.error('Error fetching user permissions:', error);
       toast.error('Failed to load user permissions');
       setUserPages([]);
       setUserCollections([]);
+      setUserForms([]);
     } finally {
       setLoadingPermissions(false);
     }
@@ -124,6 +198,7 @@ const UsersManager = () => {
     setSelectedUser(null);
     setUserPages([]);
     setUserCollections([]);
+    setUserForms([]);
     setActiveTab('pages');
   };
 
@@ -145,22 +220,89 @@ const UsersManager = () => {
     }
   };
 
+  const handleToggleForm = (formId) => {
+    const formIdStr = formId.toString();
+    if (userForms.includes(formIdStr)) {
+      setUserForms(userForms.filter((id) => id !== formIdStr));
+    } else {
+      setUserForms([...userForms, formIdStr]);
+    }
+  };
+
   const handleSavePermissions = async () => {
     if (!selectedUser) return;
 
     try {
       setSavingPermissions(true);
       
+      const userId = selectedUser._id || selectedUser.id;
+      console.log('Saving permissions for user:', userId);
+      console.log('Pages:', userPages);
+      console.log('Collections:', userCollections);
+      console.log('Forms:', userForms);
+      
       // Update pages permissions
-      await updateUserPages(selectedUser._id || selectedUser.id, userPages);
+      try {
+        await updateUserPages(userId, userPages);
+        console.log('Pages permissions updated successfully');
+      } catch (error) {
+        console.error('Error updating user pages:', error);
+        throw error;
+      }
       
       // Update collections permissions
       try {
-        await updateUserCollections(selectedUser._id || selectedUser.id, userCollections);
+        await updateUserCollections(userId, userCollections);
+        console.log('Collections permissions updated successfully');
       } catch (error) {
         console.error('Error updating user collections:', error);
         // If endpoint doesn't exist yet, just log the error but don't fail
         if (error.response?.status !== 404) {
+          throw error;
+        }
+      }
+
+      // Update forms permissions
+      try {
+        console.log('Updating user forms permissions:', {
+          userId: userId,
+          formIds: userForms,
+          formIdsCount: userForms.length,
+          formIdsType: typeof userForms,
+          formIdsIsArray: Array.isArray(userForms)
+        });
+        
+        // Ensure formIds is an array
+        const formIdsToSend = Array.isArray(userForms) ? userForms : [];
+        
+        const response = await updateUserForms(userId, formIdsToSend);
+        console.log('Update user forms response:', response);
+        console.log('Forms permissions updated successfully');
+      } catch (error) {
+        console.error('Error updating user forms:', error);
+        console.error('Error details:', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          message: error.message,
+          url: error.config?.url,
+          method: error.config?.method,
+          requestData: error.config?.data
+        });
+        
+        // Show specific error message
+        const errorMessage = error.response?.data?.message || 
+                           error.response?.data?.error || 
+                           error.message || 
+                           'Failed to update user forms';
+        
+        toast.error(`Failed to update user forms: ${errorMessage}`);
+        
+        // If endpoint doesn't exist yet (404), don't fail the whole operation
+        if (error.response?.status === 404) {
+          console.warn('Forms endpoint not found (404), skipping forms update');
+        } else {
+          // For other errors, throw to show error but continue
           throw error;
         }
       }
@@ -169,7 +311,10 @@ const UsersManager = () => {
       handleClosePermissionsModal();
     } catch (error) {
       console.error('Error updating user permissions:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to update permissions';
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          error.message || 
+                          'Failed to update permissions';
       toast.error(errorMessage);
     } finally {
       setSavingPermissions(false);
@@ -358,6 +503,16 @@ const UsersManager = () => {
                     >
                       📦 Collections
                     </button>
+                    <button
+                      onClick={() => setActiveTab('forms')}
+                      className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                        activeTab === 'forms'
+                          ? 'text-[#4CAF50] dark:text-[#81C784] border-b-2 border-[#4CAF50] dark:border-[#81C784]'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      📋 Forms
+                    </button>
                   </div>
 
                   {/* Pages Tab */}
@@ -426,6 +581,44 @@ const UsersManager = () => {
                                 />
                                 <span className="ml-1.5 text-xs text-gray-700 dark:text-gray-300">
                                   {collection.name}
+                                  {isChecked && <span className="ml-1 text-[#4CAF50] dark:text-[#81C784]">✓</span>}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Forms Tab */}
+                  {activeTab === 'forms' && (
+                    <div className="mb-2">
+                      <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+                        Select forms that this user can access:
+                      </p>
+                      <div className="space-y-1 max-h-64 overflow-y-auto">
+                        {forms.length === 0 ? (
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">No forms available</p>
+                        ) : (
+                          forms.map((form) => {
+                            const formId = (form._id || form.id).toString();
+                            // Ensure both are strings for comparison
+                            const isChecked = userForms.some((id) => id.toString() === formId);
+
+                            return (
+                              <label
+                                key={formId}
+                                className="flex items-center p-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleToggleForm(formId)}
+                                  className="h-3.5 w-3.5 text-[#4CAF50] dark:text-[#81C784] focus:ring-[#4CAF50] dark:focus:ring-[#81C784] border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                                />
+                                <span className="ml-1.5 text-xs text-gray-700 dark:text-gray-300">
+                                  {form.name}
                                   {isChecked && <span className="ml-1 text-[#4CAF50] dark:text-[#81C784]">✓</span>}
                                 </span>
                               </label>
